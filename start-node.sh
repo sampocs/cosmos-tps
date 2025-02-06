@@ -16,6 +16,7 @@ simd config set client chain-id $CHAIN_ID
 simd config set client keyring-backend test
 simd config set app api.enable true
 sed -i '' 's/timeout_commit = "5s"/timeout_commit = "1s"/' $config_toml
+sed -i '' 's/pprof_laddr = "localhost:6060"/pprof_laddr = "127.0.0.1:6060"/' $config_toml
 
 echo $MNEMONIC | simd keys add val --recover
 
