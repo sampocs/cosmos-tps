@@ -4,3 +4,6 @@ install:
 
 start:
 	bash start-node.sh
+
+test:
+	pnpm ts-node src/index.ts

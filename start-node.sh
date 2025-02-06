@@ -17,7 +17,7 @@ echo $MNEMONIC | simd keys add val --recover
 
 simd init simapp --chain-id $CHAIN_ID
 
-simd genesis add-genesis-account val 5000000000stake --keyring-backend test
+simd genesis add-genesis-account val 100000000000000stake --keyring-backend test
 simd genesis gentx val 1000000stake --chain-id $CHAIN_ID
 simd genesis collect-gentxs
 

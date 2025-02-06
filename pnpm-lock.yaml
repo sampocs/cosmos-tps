@@ -8,9 +8,15 @@ importers:
 
   .:
     dependencies:
+      '@cosmjs/proto-signing':
+        specifier: ^0.33.0
+        version: 0.33.0
       '@cosmjs/stargate':
         specifier: ^0.33.0
         version: 0.33.0
+      cosmjs-types:
+        specifier: ^0.9.0
+        version: 0.9.0
       secretjs:
         specifier: ^1.15.1
         version: 1.15.1

@@ -15,12 +15,13 @@ function sleep(ms: number) {
 
 async function main() {
   try {
-    const TXS_TO_SEND = 22_000;
-    const URL = "http://localhost:1317";
-    const CHAIN_ID = "secretdev-1";
+    const TXS_TO_SEND = 20;
+    const URL = "http://127.0.0.1:1317";
+    const CHAIN_ID = "chain-1";
 
     const wallet = new Wallet(
-      "grant rice replace explain federal release fix clever romance raise often wild taxi quarter soccer fiber love must tape steak together observe swap guitar"
+      "grant rice replace explain federal release fix clever romance raise often wild taxi quarter soccer fiber love must tape steak together observe swap guitar",
+      { bech32Prefix: "cosmos" }
     );
 
     const secretjs = new SecretNetworkClient({
@@ -35,7 +36,7 @@ async function main() {
     console.log(new Date().toISOString(), "generating wallets...");
 
     const secretjss = new Array(TXS_TO_SEND).fill(0).map((_) => {
-      const wallet = new AminoWallet(); // replace with Wallet for direct
+      const wallet = new AminoWallet(undefined, { bech32Prefix: "cosmos" }); // replace with Wallet for direct
       return new SecretNetworkClient({
         url: URL,
         chainId: CHAIN_ID,
@@ -57,14 +58,14 @@ async function main() {
           inputs: [
             {
               address: secretjs.address,
-              coins: coinsFromString(`${1e6 * MULTISEND_BATCH}uscrt`),
+              coins: coinsFromString(`${1e6 * MULTISEND_BATCH}stake`),
             },
           ],
           outputs: secretjss
             .slice(i * MULTISEND_BATCH, i * MULTISEND_BATCH + MULTISEND_BATCH)
             .map((secretjs) => ({
               address: secretjs.address,
-              coins: coinsFromString(`${1e6}uscrt`),
+              coins: coinsFromString(`${1e6}stake`),
             })),
         },
         {
@@ -99,7 +100,7 @@ async function main() {
         {
           from_address: secretjs.address,
           to_address: secretjs.address,
-          amount: coinsFromString("1uscrt"),
+          amount: coinsFromString("1stake"),
         },
         {
           broadcastMode: BroadcastMode.Async,
