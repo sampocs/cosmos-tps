@@ -4,8 +4,21 @@ import {
   SecretNetworkClient,
   Wallet,
 } from "secretjs";
-import { BaseAccount } from "secretjs/dist/grpc_gateway/cosmos/auth/v1beta1/auth.pb";
 import { AminoWallet } from "secretjs/dist/wallet_amino";
+import { GetLatestBlockResponse } from "secretjs/dist/grpc_gateway/cosmos/base/tendermint/v1beta1/query.pb";
+
+const TXS_TO_SEND = 1;
+
+const URL = "http://127.0.0.1:1317";
+const CHAIN_ID = "chain-1";
+
+const DENOM = "uscrt";
+const FAUCET_MNEMONIC =
+  "grant rice replace explain federal release fix clever romance raise often wild taxi quarter soccer fiber love must tape steak together observe swap guitar";
+const WALLET_OPTS = {
+  bech32Prefix: "cosmos",
+  coinType: 118,
+};
 
 function sleep(ms: number) {
   return new Promise((accept) => setTimeout(accept, ms));
@@ -15,156 +28,167 @@ function log(s: string) {
   console.log(new Date().toISOString(), s);
 }
 
-// docker run -it -p 1317:1316 --name localsecret ghcr.io/scrtlabs/localsecret:v1.6.0-patch.2
+async function createAccounts(): Promise<SecretNetworkClient[]> {
+  log("creating accounts...");
 
-async function main() {
-  try {
-    const TXS_TO_SEND = 20;
-    const URL = "http://127.0.0.1:1317";
-    const CHAIN_ID = "chain-1";
-    const DENOM = "uscrt";
+  const faucetWallet = new Wallet(FAUCET_MNEMONIC, WALLET_OPTS);
+  const faucetClient = new SecretNetworkClient({
+    url: URL,
+    chainId: CHAIN_ID,
+    wallet: faucetWallet,
+    walletAddress: faucetWallet.address,
+  });
 
-    const wallet = new Wallet(
-      "grant rice replace explain federal release fix clever romance raise often wild taxi quarter soccer fiber love must tape steak together observe swap guitar",
-      { bech32Prefix: "cosmos", coinType: 118 }
-    );
+  log("generating wallets...");
 
-    const secretjs = new SecretNetworkClient({
+  const userClients = new Array(TXS_TO_SEND).fill(0).map((_) => {
+    const userWallet = new AminoWallet(undefined, WALLET_OPTS); // replace with Wallet for direct
+    return new SecretNetworkClient({
       url: URL,
       chainId: CHAIN_ID,
-      wallet: wallet,
-      walletAddress: wallet.address,
+      wallet: userWallet,
+      walletAddress: userWallet.address,
     });
+  });
 
-    const startBlock = await secretjs.query.tendermint.getLatestBlock({});
+  log("funding wallets...");
 
-    log("generating wallets...");
+  const batchSize = 5;
+  const numBatches = Math.ceil(TXS_TO_SEND / batchSize);
 
-    const secretjss = new Array(TXS_TO_SEND).fill(0).map((_) => {
-      const wallet = new AminoWallet(undefined, {
-        bech32Prefix: "cosmos",
-        coinType: 118,
-      }); // replace with Wallet for direct
-      return new SecretNetworkClient({
-        url: URL,
-        chainId: CHAIN_ID,
-        wallet: wallet,
-        walletAddress: wallet.address,
-      });
-    });
+  for (let i = 0; i < numBatches; i++) {
+    const start = i * batchSize;
+    const end = Math.min((i + 1) * batchSize + 1, TXS_TO_SEND);
 
-    const MULTISEND_BATCH = TXS_TO_SEND / 4;
-    for (let i = 0; i < TXS_TO_SEND / MULTISEND_BATCH; i++) {
-      log(
-        `funding accounts ${i * MULTISEND_BATCH} - ${
-          i * MULTISEND_BATCH + MULTISEND_BATCH
-        } out of ${TXS_TO_SEND}...`
-      );
-      const tx = await secretjs.tx.bank.multiSend(
-        {
-          inputs: [
-            {
-              address: secretjs.address,
-              coins: coinsFromString(`${1e6 * MULTISEND_BATCH}${DENOM}`),
-            },
-          ],
-          outputs: secretjss
-            .slice(i * MULTISEND_BATCH, i * MULTISEND_BATCH + MULTISEND_BATCH)
-            .map((secretjs) => ({
-              address: secretjs.address,
-              coins: coinsFromString(`${1e6}${DENOM}`),
-            })),
-        },
-        {
-          gasLimit: 100_000_000,
-        }
-      );
-      if (tx.code != 0) {
-        throw tx.rawLog;
+    log(`funding accounts ${start + 1} - ${end} out of ${TXS_TO_SEND}...`);
+
+    const userAmmount = coinsFromString(`${1e6}${DENOM}`);
+    const batchAmount = coinsFromString(`${1e6 * (end - start)}${DENOM}`);
+
+    const tx = await faucetClient.tx.bank.multiSend(
+      {
+        inputs: [
+          {
+            address: faucetClient.address,
+            coins: batchAmount,
+          },
+        ],
+        outputs: userClients.slice(start, end).map((user) => ({
+          address: user.address,
+          coins: userAmmount,
+        })),
+      },
+      {
+        gasLimit: 100_000_000,
       }
-    }
-
-    log("getting accounts...");
-
-    const allAccounts = await secretjs.query.auth.accounts({
-      pagination: { limit: String(1e6) },
-    });
-    const accountsMap: Map<string, BaseAccount> = new Map();
-    allAccounts.accounts?.forEach((a) =>
-      accountsMap.set((a as BaseAccount).address!, a as BaseAccount)
     );
+    if (tx.code != 0) {
+      throw tx.rawLog;
+    }
+  }
 
-    log("sending txs...");
+  await sleep(5_000);
 
-    secretjss.forEach((secretjs, idx) => {
-      const account = accountsMap.get(secretjs.address);
+  return userClients;
+}
 
-      if (!account) {
-        throw `cannot find account ${idx} ${secretjs.address}`;
-      }
+async function sendTxs(wallets: SecretNetworkClient[]): Promise<void> {
+  log("sending txs...");
 
-      secretjs.tx.bank.send(
+  await Promise.all(
+    wallets.map((user) =>
+      user.tx.bank.send(
         {
-          from_address: secretjs.address,
-          to_address: secretjs.address,
+          from_address: user.address,
+          to_address: user.address,
           amount: coinsFromString(`1${DENOM}`),
         },
         {
           broadcastMode: BroadcastMode.Async,
           waitForCommit: false,
-          explicitSignerData: {
-            accountNumber: Number(account.account_number!),
-            sequence: Number(account.sequence!),
-            chainId: CHAIN_ID,
-          },
+          gasLimit: 25_000,
+          gasPriceInFeeDenom: 0.1,
+          feeDenom: DENOM,
         }
-      );
-    });
-
-    // let it process a bit
-    await sleep(30_000);
-
-    let end_block = await secretjs.query.tendermint.getLatestBlock({});
-    while (end_block.block?.data?.txs?.length! > 0) {
-      await sleep(3_000);
-      end_block = await secretjs.query.tendermint.getLatestBlock({});
-    }
-
-    const heightTxs: Map<string, number> = new Map();
-    const heightTimes: Map<string, string> = new Map();
-    for (
-      let i = Number(startBlock.block?.header?.height!) + 1;
-      i <= Number(end_block.block?.header?.height!);
-      i++
-    ) {
-      const block = await secretjs.query.tendermint.getBlockByHeight({
-        height: String(i),
-      });
-      heightTxs.set(
-        block.block?.header?.height!,
-        block.block?.data?.txs?.length!
-      );
-      heightTimes.set(
-        block.block?.header?.height!,
-        String(block.block?.header?.time!)
-      );
-    }
-
-    console.log(
-      "txs per block",
-      new Date().toISOString(),
-      Object.fromEntries(heightTxs.entries())
-    );
-
-    console.log(
-      "block times",
-      new Date().toISOString(),
-      Object.fromEntries(heightTimes.entries())
-    );
-  } catch (err) {
-    console.error(err);
-    throw err;
-  }
+      )
+    )
+  ).catch((error) => {
+    console.error("Failed to process transactions");
+    throw error;
+  });
 }
 
-main();
+async function waitForTxsToFinish(
+  client: SecretNetworkClient
+): Promise<GetLatestBlockResponse> {
+  log("waiting for txs to finish...");
+
+  await sleep(30_000);
+
+  let endBlock = await client.query.tendermint.getLatestBlock({});
+  while (endBlock.block?.data?.txs?.length! > 0) {
+    await sleep(3_000);
+    endBlock = await client.query.tendermint.getLatestBlock({});
+  }
+
+  return endBlock;
+}
+
+async function summarizeResults(
+  client: SecretNetworkClient,
+  startBlock: GetLatestBlockResponse,
+  endBlock: GetLatestBlockResponse
+): Promise<void> {
+  const startHeight = Number(startBlock.block?.header?.height!);
+  const endHeight = Number(endBlock.block?.header?.height!);
+
+  const heightTxs: Map<string, number> = new Map();
+  const heightTimes: Map<string, string> = new Map();
+  for (let i = startHeight + 1; i <= endHeight; i++) {
+    const block = await client.query.tendermint.getBlockByHeight({
+      height: String(i),
+    });
+    heightTxs.set(
+      block.block?.header?.height!,
+      block.block?.data?.txs?.length!
+    );
+    heightTimes.set(
+      block.block?.header?.height!,
+      String(block.block?.header?.time!)
+    );
+  }
+
+  console.log(
+    "txs per block",
+    new Date().toISOString(),
+    Object.fromEntries(heightTxs.entries())
+  );
+
+  console.log(
+    "block times",
+    new Date().toISOString(),
+    Object.fromEntries(heightTimes.entries())
+  );
+}
+
+async function main() {
+  const client = new SecretNetworkClient({
+    url: URL,
+    chainId: CHAIN_ID,
+  });
+
+  const wallets = await createAccounts();
+
+  const startBlock = await client.query.tendermint.getLatestBlock({});
+
+  await sendTxs(wallets);
+
+  const endBlock = await waitForTxsToFinish(client);
+
+  await summarizeResults(client, startBlock, endBlock);
+}
+
+main().catch((err) => {
+  console.log(err);
+  process.exit(1);
+});
