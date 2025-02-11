@@ -3,7 +3,7 @@
 set -eu
 
 CHAIN_ID=chain-1
-DENOM=uscrt
+DENOM=uatom
 SIMAPP_HOME=${HOME}/.simapp
 MNEMONIC="grant rice replace explain federal release fix clever romance raise often wild taxi quarter soccer fiber love must tape steak together observe swap guitar"
 
